@@ -1,0 +1,107 @@
+---
+title: "RISW short course example - optimization"
+author: "Yao Chen"
+date: "`r Sys.Date()`"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Example 3
+
+Description of study background or refer to the slides pages. 
+Set up assumptions of marginal power, correlation, etc
+
+```{r set_up}
+alpha = 0.025  # one-sided significance level
+# marginal power for each hypo
+marginal_power <- c(0.9, 0.7, 0.75, 0.625)
+# correlation matrix
+cor_matrix <- matrix(c(1, 0.5, 0.8, 0.4,
+                       0.5, 1, 0.4, 0.8,
+                       0.8, 0.4, 1, 0.5,
+                       0.4, 0.8, 0.5, 1), nrow=4)
+```
+
+```{r study_graph, fig.align="center", fig.width=4, fig.height=3}
+# Define graph using graphicalMCP
+graph.study <- graphicalMCP::graph_create(hypotheses = c(0.5, 0.5, 0, 0),
+                                          transitions = matrix(c(0, 0.5, 0.5, 0,
+                                                                 0.5, 0, 0, 0.5,
+                                                                 0, 1, 0, 0,
+                                                                 1, 0, 0, 0),
+                                                               nrow=4, byrow=T),
+                                          hyp_names = c("H1", "H2", "H3", "H4"))
+plot(graph.study, vertex.size = 30)
+```
+
+
+## Optimization
+
+### Initial Weights optimization
+
+```{r weight_optimization}
+devtools::load_all("../")
+# Set up constraint
+# NA means free to w can be any number between 0 and 1
+# constant means w is pre-defined and should not be optimized
+w.constraint <- c(NA, NA, 0, 0)  # only H1 and H2 will be optimized
+weight.optim <- optimalMCP::optim_w_dp(alpha = alpha, mp = marginal_power,
+                                       rho = cor_matrix,
+                                       constraint.w = w.constraint)
+w.optim <- round(weight.optim$w, 2)
+```
+
+
+```{r disjunctive_power}
+dp.optim <- weight.optim$power
+dp.study <- optimalMCP::disjunctive_power(w = c(0.5, 0.5, 0, 0),
+                                          alpha = alpha,
+                                          mp = marginal_power,
+                                          rho = cor_matrix)
+```
+
+Under optimal split, the power to reject at least one primary endpoint is `r dp.optim`, however the study split will only yield disjunctive power of `r dp.study`. Besides, due to the existence of correlation between $H_1$ and $H_2$, the disjunctive power under original design is lower than the marginal power of $H_1$ alone, which means a hierarchical design of $H_1 \to H_2$ would be better than split $\alpha$ between two primary endpoints.
+
+
+### Transition matrix optimization
+
+```{r G_optimization}
+# Set up constraint
+G.constraint <- matrix(c(0, NA, NA, 0,
+                         NA, 0, 0, NA,
+                         0, 1, 0, 0,
+                         1, 0, 0, 0),
+                       nrow = 4, byrow = T)
+G.optim <- optimalMCP::optim_G_dp(alpha = alpha, w = w.optim, mp = marginal_power,
+                                  rho = cor_matrix,
+                                  constraint.G = G.constraint)
+```
+
+
+### Optimal graph
+```{r optim_graph, fig.align="center", fig.width=4, fig.height=3}
+graph.optim <- graphicalMCP::graph_create(hypotheses = w.optim,
+                                          transitions = round(G.optim, 2),
+                                          hyp_names = c("H1", "H2", "H3", "H4"))
+plot(graph.optim, vertex.size = 30)
+```
+
+
+## Power comparison
+
+```{r power_comparison}
+set.seed(123)
+power.study <- graphicalMCP::graph_calculate_power(graph = graph.study, alpha = alpha,
+                                                   sim_corr = cor_matrix, sim_n = 1e5,
+                                                   power_marginal = marginal_power)
+print(power.study)
+
+set.seed(123)
+power.optim <- graphicalMCP::graph_calculate_power(graph = graph.optim, alpha = alpha,
+                                                   sim_corr = cor_matrix, sim_n = 1e5,
+                                                   power_marginal = marginal_power)
+print(power.optim)
+```
